@@ -2,55 +2,47 @@ using System.Globalization;
 
 namespace mortage;
 
-public class Mortage
+public record SweepPoint(int DepositMonths, double TotalInterest, double DepositGrown);
+public record SweepResult(IReadOnlyList<SweepPoint> Points, SweepPoint Best);
+
+public static class Mortage
 {
-    public static NumberFormatInfo nfi = new NumberFormatInfo
+    public static readonly NumberFormatInfo Nfi = new()
     {
         NumberGroupSeparator = " ",
         NumberDecimalSeparator = ",",
         NumberDecimalDigits = 2
     };
-    
-    
-    
+
     public static double GetMonthPayment(double loanAmount, double interest, int monthsLeft)
     {
-        double monthlyRate = interest / 100 / 12; // месячная ставка
-        
-        double pow = Math.Pow(1 + monthlyRate, monthsLeft);
-        double payment = loanAmount * (monthlyRate * pow) / (pow - 1);
-    
+        var monthlyRate = interest / 100 / 12;
+        var pow = Math.Pow(1 + monthlyRate, monthsLeft);
+        var payment = loanAmount * (monthlyRate * pow) / (pow - 1);
         return Math.Round(payment, 2);
     }
-    
-    public static double CalculatePercentPayMonth(double loanAmount, double  interest, DateTime payDate)
+
+    public static double CalculatePercentPayMonth(double loanAmount, double interest, DateTime payDate)
     {
         var beforeMonth = payDate.AddMonths(-1);
-        int daysBetween = (payDate - beforeMonth).Days;
-        //var dayInMonth = DateTime.DaysInMonth(beforeMonth.Year, beforeMonth.Month);
+        var daysBetween = (payDate - beforeMonth).Days;
         var daysInYear = DateTime.IsLeapYear(beforeMonth.Year) ? 366 : 365;
-        var percent =  loanAmount * (interest * daysBetween) / (100 * daysInYear);
+        var percent = loanAmount * (interest * daysBetween) / (100 * daysInYear);
         return Math.Round(percent, 2);
     }
 
     public static double CalculateAllPays(MortageOptions options)
     {
-        return CalculateAllPays(options.MortgageSize, options.MortgageInterest, options.MortgageDate, options.MonthsLeft);
-    }
-    
-    public static double CalculateAllPays(double loanAmount, double  interest, DateTime firstPay, int monthsLeft)
-    {
-        var monthPayment = GetMonthPayment(loanAmount, interest, monthsLeft);
+        var loanAmount = (double)options.MortgageSize;
+        var monthPayment = GetMonthPayment(loanAmount, options.MortgageInterest, options.MonthsLeft);
+        var firstPay = options.MortgageDate;
         double percentPayed = 0;
-        double mainPay = 0;
-        while (loanAmount>0)
+        while (loanAmount > 0)
         {
-            var percentPay = CalculatePercentPayMonth(loanAmount, interest, firstPay);
+            var percentPay = CalculatePercentPayMonth(loanAmount, options.MortgageInterest, firstPay);
             percentPayed += percentPay;
-            mainPay = Math.Round(monthPayment - percentPay, 2, MidpointRounding.ToEven);
-            loanAmount =  Math.Round(loanAmount-mainPay,2);
-            //Console.WriteLine($"{firstPay.ToString("d")}- {monthPayment}, {mainPay}, {percentPay}, {loanAmount.ToString("N",nfi)}");
-            
+            var mainPay = Math.Round(monthPayment - percentPay, 2, MidpointRounding.ToEven);
+            loanAmount = Math.Round(loanAmount - mainPay, 2);
             firstPay = firstPay.AddMonths(1);
         }
         return percentPayed;
@@ -58,82 +50,65 @@ public class Mortage
 
     public static double CalculateWithOneExtraPay(MortageOptions options)
     {
-        return CalculateWithOneExtraPay(options.MortgageSize, options.MortgageInterest, options.MortgageDate, options.MonthsLeft, options.ExtraPay);
-    }
-    
-    public static double CalculateWithOneExtraPay(double loanAmount, double  interest, DateTime firstPay, int monthsLeft, ExtraPay extraPay)
-    {
-        var monthPayment = GetMonthPayment(loanAmount, interest, monthsLeft);
+        var loanAmount = (double)options.MortgageSize;
+        var monthPayment = GetMonthPayment(loanAmount, options.MortgageInterest, options.MonthsLeft);
+        var firstPay = options.MortgageDate;
         double percentPayed = 0;
-        double mainPay = 0;
-        while (loanAmount>0)
+        while (loanAmount > 0)
         {
-            var percentPay = CalculatePercentPayMonth(loanAmount, interest, firstPay);
+            var percentPay = CalculatePercentPayMonth(loanAmount, options.MortgageInterest, firstPay);
             percentPayed += percentPay;
-            mainPay = Math.Round(monthPayment - percentPay, 2, MidpointRounding.ToEven);
-            loanAmount =  Math.Round(loanAmount-mainPay,2);
-            if (extraPay.DateOfMoney.Year == firstPay.Year && extraPay.DateOfMoney.Month == firstPay.Month)
+            var mainPay = Math.Round(monthPayment - percentPay, 2, MidpointRounding.ToEven);
+            loanAmount = Math.Round(loanAmount - mainPay, 2);
+            if (options.ExtraPay.DateOfMoney.Year == firstPay.Year &&
+                options.ExtraPay.DateOfMoney.Month == firstPay.Month)
             {
-                loanAmount -= extraPay.CountOfMoney;
+                loanAmount -= options.ExtraPay.CountOfMoney;
             }
-            //Console.WriteLine($"{firstPay.ToString("d")}- {monthPayment}, {mainPay}, {percentPay}, {loanAmount.ToString("N",nfi)}");
-            
             firstPay = firstPay.AddMonths(1);
         }
         return percentPayed;
     }
 
-    public static void CalculateWithAllExtraPayVariations(MortageOptions options)
+    public static SweepResult CalculateWithAllExtraPayVariations(MortageOptions options)
     {
-        CalculateWithAllExtraPayVariations(options.MortgageSize, options.MortgageInterest, options.MortgageDate, options.MonthsLeft, options.ExtraPay);
-    }
-    
-    public static void CalculateWithAllExtraPayVariations(double startLoanAmount, double  interest, DateTime firstLoandatePay, 
-        int monthsLeft, ExtraPay extraPay)
-    {
-        double minpercentPay = 1000000000;
-        int minDepositMonthByPercent = 1000;
-        var monthPayment = GetMonthPayment(startLoanAmount, interest, monthsLeft);
-        for (int i = 1; i < extraPay.DepositMaxMonthKeep; i++)
+        var points = new List<SweepPoint>(options.ExtraPay.DepositMaxMonthKeep);
+        var monthPayment = GetMonthPayment(options.MortgageSize, options.MortgageInterest, options.MonthsLeft);
+
+        for (var i = 1; i < options.ExtraPay.DepositMaxMonthKeep; i++)
         {
             var depositMonthLeft = i;
-            var depostiCountOfMonety = extraPay.CountOfMoney;
-            var firstPay = firstLoandatePay;
-            var loanAmount = startLoanAmount;
-            
+            var depositCountOfMoney = options.ExtraPay.CountOfMoney;
+            var firstPay = options.MortgageDate;
+            var loanAmount = (double)options.MortgageSize;
+
             double percentPayed = 0;
-            double mainPay = 0;
-            while (loanAmount>0)
+            while (loanAmount > 0)
             {
-                var percentPay = CalculatePercentPayMonth(loanAmount, interest, firstPay);
+                var percentPay = CalculatePercentPayMonth(loanAmount, options.MortgageInterest, firstPay);
                 percentPayed += percentPay;
-                mainPay = Math.Round(monthPayment - percentPay, 2, MidpointRounding.ToEven);
-                loanAmount =  Math.Round(loanAmount-mainPay,2);
-                
-                if (firstPay>extraPay.DateOfMoney && depositMonthLeft >0)
+                var mainPay = Math.Round(monthPayment - percentPay, 2, MidpointRounding.ToEven);
+                loanAmount = Math.Round(loanAmount - mainPay, 2);
+
+                if (firstPay > options.ExtraPay.DateOfMoney && depositMonthLeft > 0)
                 {
-                    depostiCountOfMonety += depostiCountOfMonety * extraPay.DepositInterest/100 / 12;
+                    depositCountOfMoney += depositCountOfMoney * options.ExtraPay.DepositInterest / 100 / 12;
                     depositMonthLeft--;
                 }
 
-                if (depositMonthLeft==0)
+                if (depositMonthLeft == 0)
                 {
-                    loanAmount-= depostiCountOfMonety;
+                    loanAmount -= depositCountOfMoney;
                     depositMonthLeft -= 100000;
-                    
                 }
-            
+
                 firstPay = firstPay.AddMonths(1);
             }
-            
-            if (minpercentPay > percentPayed)
-            {
-                minpercentPay = percentPayed;
-                minDepositMonthByPercent = i;
-            }
-            
-            Console.WriteLine($"monthCountDeposit:{i}, PercendPayed:{percentPayed.ToString("N",nfi)},  depostiCountOfMonety:{depostiCountOfMonety.ToString("N",nfi)} ");
+
+            points.Add(new SweepPoint(i, percentPayed, depositCountOfMoney));
         }
-        Console.WriteLine($"minDepositMonthByPercent:{minDepositMonthByPercent}, minPercent:{minpercentPay.ToString("N",nfi)}");
+
+        var best = points.MinBy(p => p.TotalInterest)!;
+        return new SweepResult(points, best);
     }
 }
